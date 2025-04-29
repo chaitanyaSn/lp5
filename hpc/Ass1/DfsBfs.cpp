@@ -6,41 +6,35 @@
 using namespace std;
 
 // Graph using adjacency list
-class Graph
-{
+class Graph {
 public:
     int V;
     vector<vector<int>> adj;
 
-    Graph(int V)
-    {
+    Graph(int V) {
         this->V = V;
         adj.resize(V);
     }
 
-    void addEdge(int u, int v)
-    {
+    void addEdge(int u, int v) {
         adj[u].push_back(v);
         adj[v].push_back(u); // undirected graph
     }
 };
 
-void parallelBFS(Graph &g, int start)
-{
+// Parallel BFS using OpenMP
+void parallelBFS(Graph &g, int start) {
     vector<bool> visited(g.V, false);
     queue<int> q;
 
     visited[start] = true;
     q.push(start);
 
-    while (!q.empty())
-    {
+    while (!q.empty()) {
         int size = q.size();
         vector<int> current_level;
 
-        // Collect current level nodes
-        for (int i = 0; i < size; ++i)
-        {
+        for (int i = 0; i < size; ++i) {
             int node = q.front();
             q.pop();
             cout << node << " ";
@@ -49,64 +43,75 @@ void parallelBFS(Graph &g, int start)
 
         vector<int> next_level;
 
-        // Expand all current level nodes in parallel
         #pragma omp parallel for
-        for (int i = 0; i < current_level.size(); ++i)
-        {
+        for (int i = 0; i < current_level.size(); ++i) {
             int u = current_level[i];
-            for (int v : g.adj[u])
-            {
-                if (!visited[v])
-                {
+            for (int v : g.adj[u]) {
+                bool shouldVisit = false;
+
                 #pragma omp critical
-                    {
-                        if (!visited[v])
-                        { // double-check inside critical
-                            visited[v] = true;
-                            next_level.push_back(v);
-                        }
+                {
+                    if (!visited[v]) {
+                        visited[v] = true;
+                        shouldVisit = true;
                     }
+                }
+
+                if (shouldVisit) {
+                    #pragma omp critical
+                    next_level.push_back(v);
                 }
             }
         }
 
-        // Push next level nodes to queue
-        for (int v : next_level)
-        {
+        for (int v : next_level) {
             q.push(v);
         }
     }
+    cout << endl;
 }
 
-void parallelDFSUtil(Graph &g, int u, vector<bool> &visited)
-{
-#pragma omp critical
+// Parallel DFS using OpenMP tasks (safe version)
+void parallelDFSUtil(Graph &g, int u, vector<bool> &visited) {
+    bool skip = false;
+
+    #pragma omp critical
     {
-        if (visited[u])
-            return;
-        visited[u] = true;
-        cout << u << " ";
+        if (visited[u]) {
+            skip = true;
+        } else {
+            visited[u] = true;
+            cout << u << " ";
+        }
     }
 
-#pragma omp parallel for
-    for (int i = 0; i < g.adj[u].size(); ++i)
-    {
-        int v = g.adj[u][i];
-        if (!visited[v])
+    if (skip) return;
+
+    for (int v : g.adj[u]) {
+        #pragma omp task
         {
             parallelDFSUtil(g, v, visited);
         }
     }
+
+    #pragma omp taskwait
 }
 
-void parallelDFS(Graph &g, int start)
-{
+void parallelDFS(Graph &g, int start) {
     vector<bool> visited(g.V, false);
-    parallelDFSUtil(g, start, visited);
+
+    #pragma omp parallel
+    {
+        #pragma omp single
+        {
+            parallelDFSUtil(g, start, visited);
+        }
+    }
+
+    cout << endl;
 }
 
-int main()
-{
+int main() {
     Graph g(7);
 
     g.addEdge(0, 1);
